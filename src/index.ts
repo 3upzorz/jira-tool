@@ -2,7 +2,7 @@ import { input, select, confirm } from '@inquirer/prompts';
 import chalk from 'chalk';
 import { execSync } from 'child_process';
 import { loadConfig, saveConfig, type Config, type Project } from './config.ts';
-import { fetchProjects, createIssue } from './api.ts';
+import { fetchProjects, createIssue, fetchIssue, type IssueDetail } from './api.ts';
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
@@ -61,12 +61,84 @@ async function pickProject(config: Config): Promise<Project> {
   return project;
 }
 
+// ─── Display issue ────────────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, (s: string) => string> = {
+  'To Do':       chalk.gray,
+  'New':         chalk.gray,
+  'In Progress': chalk.blue,
+  'In Review':   chalk.cyan,
+  'Done':        chalk.green,
+};
+
+function statusColor(statusCategory: string, statusName: string): (s: string) => string {
+  if (STATUS_COLORS[statusName]) return STATUS_COLORS[statusName];
+  if (statusCategory === 'Done') return chalk.green;
+  if (statusCategory === 'In Progress') return chalk.blue;
+  return chalk.gray;
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function section(label: string): string {
+  const line = '─'.repeat(Math.max(0, 60 - label.length - 2));
+  return chalk.dim(`── ${label} ${line}`);
+}
+
+function displayIssue(issue: IssueDetail, jiraUrl: string): void {
+  const colorFn = statusColor(issue.statusCategory, issue.status);
+  const badge = colorFn(` ${issue.status} `);
+
+  console.log();
+  console.log(`${chalk.bold(issue.key)}  ${badge}`);
+  console.log(chalk.white.bold(issue.summary));
+  console.log(chalk.dim(`${jiraUrl}/browse/${issue.key}`));
+
+  // Description
+  console.log('\n' + section('Description'));
+  if (issue.description.trim()) {
+    console.log(issue.description);
+  } else {
+    console.log(chalk.dim('  No description.'));
+  }
+
+  // Subtasks
+  if (issue.subtasks.length > 0) {
+    console.log('\n' + section(`Subtasks (${issue.subtasks.length})`));
+    for (const st of issue.subtasks) {
+      const done = st.status === 'Done';
+      const marker = done ? chalk.green('✓') : chalk.dim('○');
+      const text = done ? chalk.strikethrough.dim(st.summary) : st.summary;
+      console.log(`  ${marker} ${chalk.bold(st.key)}  ${text}`);
+    }
+  }
+
+  // Comments
+  if (issue.comments.length > 0) {
+    console.log('\n' + section(`Comments (${issue.comments.length})`));
+    for (const c of issue.comments) {
+      console.log(`\n  ${chalk.bold(c.author)} ${chalk.dim('·')} ${chalk.dim(formatDate(c.created))}`);
+      const indented = c.body
+        .split('\n')
+        .map((l) => `  ${l}`)
+        .join('\n');
+      console.log(indented);
+    }
+  }
+
+  console.log();
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   const args = process.argv.slice(2);
   const isSetup = args.includes('--setup');
   const isChangeProject = args.includes('--project');
+  const readFlagIdx = Math.max(args.indexOf('--read'), args.indexOf('-r'));
 
   let config = loadConfig();
 
@@ -81,6 +153,28 @@ async function main() {
   if (isChangeProject) {
     await pickProject(fullConfig);
     console.log(chalk.green('✓ Default project updated.'));
+    return;
+  }
+
+  // ── Read ticket ─────────────────────────────────────────────────────────
+  if (readFlagIdx !== -1) {
+    const issueKey = args[readFlagIdx + 1];
+    if (!issueKey || issueKey.startsWith('-')) {
+      console.error(chalk.red('Usage: jira --read <ISSUE-KEY>'));
+      process.exit(1);
+    }
+
+    process.stdout.write(chalk.dim('Fetching issue…'));
+    try {
+      const issue = await fetchIssue(fullConfig, issueKey.toUpperCase());
+      process.stdout.write('\r\x1b[K');
+      displayIssue(issue, fullConfig.jiraUrl);
+    } catch (err: unknown) {
+      process.stdout.write('\r\x1b[K');
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red('\nFailed to read ticket:'), message);
+      process.exit(1);
+    }
     return;
   }
 
