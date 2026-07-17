@@ -41,7 +41,12 @@ jira "Fix login bug"
 
 # Pass title and description
 jira "Fix login bug" -d "Users are unable to log in with SSO"
+
+# Link the ticket to a parent epic (pass the epic's key)
+jira "Fix login bug" -d "Users are unable to log in with SSO" --epic ENG-42
 ```
+
+The epic key is the identifier from the epic's URL / the Jira UI (`<PROJECT>-<NUMBER>`, e.g. `ENG-42`). It's case-insensitive.
 
 **Arguments:**
 
@@ -97,10 +102,13 @@ Users on iOS are experiencing a 30s timeout when attempting to log in.
 
 ### Other flags
 
-| Flag        | Description                              |
-| ----------- | ---------------------------------------- |
-| `--setup`   | Re-run credential setup                  |
-| `--project` | Change the default project               |
+| Flag             | Description                          |
+| ---------------- | ------------------------------------ |
+| `-d <text>`      | Set the ticket description           |
+| `-e`, `--epic <key>` | Link the ticket to a parent epic |
+| `--read`, `-r <ISSUE-KEY>` | Read a ticket             |
+| `--setup`        | Re-run credential setup              |
+| `--project`      | Change the default project           |
 
 ## Configuration
 
@@ -119,6 +127,45 @@ Stored at `~/.config/jira-tool/config.json`. Fields:
 npm run dev            # Run the CLI via tsx
 npm run typecheck      # Type-check with tsc --noEmit
 ```
+
+## For AI agents (Claude Code, etc.)
+
+This tool creates a real Jira ticket on every successful run — there is no dry-run or
+confirmation step. Treat each invocation as a side-effecting action: only run it when the
+user has explicitly asked for a ticket to be created, and pass the title, description, and
+parent epic non-interactively so the command never blocks on a prompt.
+
+**Always pass the title as an argument.** With no title argument the tool drops into an
+interactive prompt and will hang in a non-interactive shell. Pass `-d` for the description
+and `--epic` for the parent epic so nothing is left to prompt for. The project comes from
+the saved default (`~/.config/jira-tool/config.json`); if none is set the tool prompts for
+one interactively — check that a `defaultProject` exists before running unattended.
+
+Fully non-interactive invocation (no prompts will appear):
+
+```bash
+jira "<title>" -d "<description>" --epic <EPIC-KEY>
+```
+
+### When the `jira` command is on PATH (after `npm link`)
+
+```bash
+jira "Add rate limiting to the API" -d "Cap unauthenticated requests at 100/min" --epic ENG-42
+```
+
+### When working inside this repo (command not linked)
+
+Use the `dev` script and forward flags after `--`:
+
+```bash
+npm run dev -- "Add rate limiting to the API" -d "Cap unauthenticated requests at 100/min" --epic ENG-42
+```
+
+### Reading the result
+
+On success the ticket key is printed on its own line (e.g. `ENG-123`), followed by the
+parent epic (if any) and the browse URL. Parse the key from stdout. On failure the process
+exits non-zero and prints the error to stderr.
 
 ## Uninstalling
 

@@ -178,8 +178,26 @@ async function main() {
     return;
   }
 
+  // ── Flags with values ──────────────────────────────────────────────────────
+  // Parse these first so their values aren't mistaken for the positional title.
+  const descFlagIdx = args.indexOf('-d');
+  const descArg = descFlagIdx !== -1 ? args[descFlagIdx + 1] : undefined;
+
+  const epicFlagIdx = args.findIndex(a => a === '-e' || a === '--epic');
+  const epicArg = epicFlagIdx !== -1 ? args[epicFlagIdx + 1] : undefined;
+  if (epicFlagIdx !== -1 && (!epicArg || epicArg.startsWith('-'))) {
+    console.error(chalk.red('--epic requires an epic key, e.g. --epic ENG-42.'));
+    process.exit(1);
+  }
+  const parentKey = epicArg?.trim().toUpperCase() || undefined;
+
+  // Indices consumed as flag values — excluded from positional title detection.
+  const valueIndices = new Set<number>();
+  if (descFlagIdx !== -1) valueIndices.add(descFlagIdx + 1);
+  if (epicFlagIdx !== -1) valueIndices.add(epicFlagIdx + 1);
+
   // ── Title ────────────────────────────────────────────────────────────────
-  const titleArg = args.find(a => !a.startsWith('-'));
+  const titleArg = args.find((a, i) => !a.startsWith('-') && !valueIndices.has(i));
   const summary = titleArg ?? await input({
     message: 'Ticket title:',
     validate: v => v.trim().length > 0 || 'Title is required',
@@ -191,8 +209,6 @@ async function main() {
   }
 
   // ── Description ──────────────────────────────────────────────────────────
-  const descFlagIdx = args.indexOf('-d');
-  const descArg = descFlagIdx !== -1 ? args[descFlagIdx + 1] : undefined;
   const description = descArg ?? await input({ message: 'Description (optional, enter to skip):' });
 
   // ── Project ──────────────────────────────────────────────────────────────
@@ -205,16 +221,19 @@ async function main() {
   process.stdout.write(chalk.dim('\nCreating ticket…'));
 
   try {
-    const issue = await createIssue(
-      fullConfig,
-      project.key,
-      summary.trim(),
-      description.trim() || undefined,
-    );
+    const issue = await createIssue(fullConfig, {
+      projectKey: project.key,
+      summary: summary.trim(),
+      description: description.trim() || undefined,
+      parentKey,
+    });
 
     process.stdout.write('\r\x1b[K');
 
     console.log('\n' + chalk.green.bold(issue.key));
+    if (parentKey) {
+      console.log(chalk.dim(`↳ parent epic ${parentKey}`));
+    }
     console.log(chalk.dim(`${fullConfig.jiraUrl}/browse/${issue.key}\n`));
 
     // Copy key to clipboard (macOS)
@@ -228,6 +247,13 @@ async function main() {
     process.stdout.write('\r\x1b[K');
     const message = err instanceof Error ? err.message : String(err);
     console.error(chalk.red('\nFailed to create ticket:'), message);
+    if (parentKey && /parent/i.test(message)) {
+      console.error(
+        chalk.dim(
+          `Check that epic ${parentKey} exists and that this project allows linking tickets to it.`,
+        ),
+      );
+    }
     process.exit(1);
   }
 }

@@ -56,17 +56,26 @@ export async function fetchProjects(config: Config): Promise<Project[]> {
   return data.map((p) => ({ id: p.id, key: p.key, name: p.name }));
 }
 
+export interface CreateIssueOptions {
+  projectKey: string;
+  summary: string;
+  description?: string;
+  parentKey?: string;
+}
+
 export async function createIssue(
   config: Config,
-  projectKey: string,
-  summary: string,
-  description?: string,
+  { projectKey, summary, description, parentKey }: CreateIssueOptions,
 ): Promise<CreatedIssue> {
   const fields: Record<string, unknown> = {
     project: { key: projectKey },
     summary,
     issuetype: { name: "Task" },
   };
+
+  if (parentKey) {
+    fields.parent = { key: parentKey };
+  }
 
   if (description) {
     fields.description = {
